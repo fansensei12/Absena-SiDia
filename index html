@@ -10,68 +10,82 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
   // ============================================================
-  // ADAPTER MIGRASI: google.script.run -> fetch() ke Cloud Functions
+  // ADAPTER MIGRASI: google.script.run -> fetch() ke Apps Script Web App
+  // + SISTEM DRAFT LOKAL untuk input nilai (simpan manual via tombol)
   // ------------------------------------------------------------
-  // Seluruh kode aplikasi di bawah ini ORIGINALLY ditulis untuk
-  // Google Apps Script, memanggil server lewat:
+  // Kode aplikasi asli (di bawah blok ini) ditulis untuk Apps Script,
+  // memanggil server lewat:
   //   google.script.run.withSuccessHandler(fn).withFailureHandler(fn).namaFungsi(arg1, arg2, ...)
-  // Objek `google.script` HANYA tersedia jika halaman dirender dari
-  // dalam container Apps Script (HtmlService) — di hosting biasa
-  // (GitHub Pages, Firebase Hosting, dst) objek ini tidak ada.
+  // Objek `google.script` itu HANYA ada jika halaman dirender dari
+  // dalam container Apps Script. Karena HTML ini sekarang dihost di
+  // GitHub Pages (statis), adapter ini membuat ulang API yang sama
+  // persis secara sintaks, tapi di belakangnya memanggil fetch() ke
+  // Web App Apps Script (URL diisi di APPS_SCRIPT_URL di bawah).
   //
-  // Adapter ini membuat ulang API yang SAMA PERSIS secara sintaks,
-  // sehingga 2700+ baris logic asli di bawah tidak perlu diubah,
-  // namun di belakangnya memanggil backend baru (Cloud Functions)
-  // lewat fetch(). Setiap nama fungsi dipetakan ke 1 endpoint REST
-  // yang merupakan terjemahan langsung dari fungsi .gs yang sama.
+  // PERUBAHAN PERILAKU PENYIMPANAN NILAI:
+  //  - Dulu: tiap kali user mengetik 1 nilai, langsung 1 request ke
+  //    server (google.script.run.simpanNilaiMultiMapel(...)).
+  //  - Sekarang: tiap nilai yang diketik HANYA disimpan ke "draft"
+  //    di memori + localStorage (browser). TIDAK ada request ke
+  //    server sampai user menekan tombol "Simpan ke Sheet" di header,
+  //    yang baru benar-benar mengirim SEMUA perubahan sekaligus
+  //    dalam 1 request batch (lebih cepat & hemat kuota Apps Script).
+  //  - Fungsi read (login, muat data awal, leger, dsb) TETAP otomatis
+  //    seperti biasa, tidak melalui sistem draft.
+  //  - Jika tab/browser ditutup sebelum klik "Simpan ke Sheet",
+  //    perubahan yang belum tersimpan akan HILANG (sesuai keputusan).
   // ============================================================
-  (function(){
-    // GANTI URL INI dengan URL Cloud Functions API project Firebase Anda.
-    // Contoh: "https://asia-southeast2-NAMA_PROJECT.cloudfunctions.net/api"
-    // atau jika pakai Firebase Hosting rewrite: "/api"
-    const API_BASE = "/api";
 
-    // Peta nama fungsi -> { method, path, mapArgs }
-    // mapArgs mengubah daftar argumen posisional (seperti dipanggil di
-    // kode asli) menjadi query string (GET) atau body JSON (POST).
+  // >>> GANTI dengan URL Web App Apps Script Anda (.../exec) <<<
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwln5klXv82kl-Ul3jPhlBBQv_D5QSNf9HUZM2zK8GBW9uy_kJS81TfH4AO0MhYRuc2UQ/exec";
+
+  (function(){
+    // Peta nama fungsi (dipanggil dari kode asli) -> nama action di router doGet/doPost
+    // method "GET" dipakai untuk operasi baca (parameter kecil, lewat query string),
+    // method "POST" dipakai untuk operasi tulis (body JSON, lebih aman untuk payload besar).
     const PETA_ENDPOINT = {
-      verifikasiLoginPengguna: { method:"POST", path:"/verifikasiLoginPengguna",
+      verifikasiLoginPengguna: { method:"POST", action:"verifikasiLoginPengguna",
         mapArgs:(a)=>({ username:a[0], password:a[1] }) },
-      muatSemuaDataAwal: { method:"GET", path:"/muatSemuaDataAwal",
+      muatSemuaDataAwal: { method:"GET", action:"muatSemuaDataAwal",
         mapArgs:(a)=>({ mapelAktif:a[0] }) },
-      getDataSiswaSesuaiMapel: { method:"GET", path:"/getDataSiswaSesuaiMapel",
+      getDataSiswaSesuaiMapel: { method:"GET", action:"getDataSiswaSesuaiMapel",
         mapArgs:(a)=>({ mapelAktif:a[0] }) },
-      simpanNilaiMultiMapel: { method:"POST", path:"/simpanNilaiMultiMapel",
-        mapArgs:(a)=>({ idSiswa:a[0], mapel:a[1], tpKomp:a[2], subKomp:a[3], nilai:a[4] }) },
-      getPengaturanSistem: { method:"GET", path:"/getPengaturanSistem",
+      // simpanNilaiMultiMapel TIDAK lagi dipanggil langsung dari kode asli
+      // (sudah diganti ke catatPerubahanDraft di updateNilai()), tapi
+      // tetap dipetakan untuk jaga-jaga jika ada pemanggilan lain.
+      simpanNilaiMultiMapel: { method:"POST", action:"simpanNilaiMultiMapel",
+        mapArgs:(a)=>({ barisExcel:a[0], mapel:a[1], tpKomp:a[2], subKomp:a[3], nilai:a[4] }) },
+      simpanNilaiBatch: { method:"POST", action:"simpanNilaiBatch",
+        mapArgs:(a)=>({ daftarPerubahan:a[0] }) },
+      getPengaturanSistem: { method:"GET", action:"getPengaturanSistem",
         mapArgs:(a)=>({ mapel:a[0] }) },
-      simpanBobotGlobalSistem: { method:"POST", path:"/simpanBobotGlobalSistem",
+      simpanBobotGlobalSistem: { method:"POST", action:"simpanBobotGlobalSistem",
         mapArgs:(a)=>({ sumatif:a[0], asas:a[1], kehadiran:a[2] }) },
-      simpanBobotInternalMapel: { method:"POST", path:"/simpanBobotInternalMapel",
+      simpanBobotInternalMapel: { method:"POST", action:"simpanBobotInternalMapel",
         mapArgs:(a)=>({ mapel:a[0], bNh:a[1], bSh:a[2] }) },
-      simpanBobotInternalMapelPerUser: { method:"POST", path:"/simpanBobotInternalMapelPerUser",
+      simpanBobotInternalMapelPerUser: { method:"POST", action:"simpanBobotInternalMapelPerUser",
         mapArgs:(a)=>({ mapel:a[0], namaUser:a[1], bNh:a[2], bSh:a[3] }) },
-      simpanBobotRaporPerUser: { method:"POST", path:"/simpanBobotRaporPerUser",
+      simpanBobotRaporPerUser: { method:"POST", action:"simpanBobotRaporPerUser",
         mapArgs:(a)=>({ mapel:a[0], namaUser:a[1], sumatif:a[2], asas:a[3], hadir:a[4] }) },
-      simpanBobotInternalGlobal: { method:"POST", path:"/simpanBobotInternalGlobal",
+      simpanBobotInternalGlobal: { method:"POST", action:"simpanBobotInternalGlobal",
         mapArgs:(a)=>({ bNh:a[0], bSh:a[1] }) },
-      getBobotUntukUser: { method:"GET", path:"/getBobotUntukUser",
+      getBobotUntukUser: { method:"GET", action:"getBobotUntukUser",
         mapArgs:(a)=>({ mapel:a[0], namaUser:a[1] }) },
-      serverHapusNilaiMassalKelas: { method:"POST", path:"/serverHapusNilaiMassalKelas",
+      serverHapusNilaiMassalKelas: { method:"POST", action:"serverHapusNilaiMassalKelas",
         mapArgs:(a)=>({ mapel:a[0], kelasTarget:a[1] }) },
-      serverPembersihanNilaiSpesifikTPAja: { method:"POST", path:"/serverPembersihanNilaiSpesifikTPAja",
+      serverPembersihanNilaiSpesifikTPAja: { method:"POST", action:"serverPembersihanNilaiSpesifikTPAja",
         mapArgs:(a)=>({ mapel:a[0], kelas:a[1], tpAktif:a[2] }) },
-      serverHapusKolomTPPilihan: { method:"POST", path:"/serverHapusKolomTPPilihan",
+      serverHapusKolomTPPilihan: { method:"POST", action:"serverHapusKolomTPPilihan",
         mapArgs:(a)=>({ mapel:a[0], kelas:a[1], tpAktif:a[2], subKompList:a[3] }) },
-      serverPembersihanNilaiAsasAja: { method:"POST", path:"/serverPembersihanNilaiAsasAja",
+      serverPembersihanNilaiAsasAja: { method:"POST", action:"serverPembersihanNilaiAsasAja",
         mapArgs:(a)=>({ mapel:a[0], kelas:a[1] }) },
-      ambilDataLegerKelas: { method:"GET", path:"/ambilDataLegerKelas",
+      ambilDataLegerKelas: { method:"GET", action:"ambilDataLegerKelas",
         mapArgs:(a)=>({ kelasTarget:a[0] }) },
-      adminProsesUploadMasterCSV: { method:"POST", path:"/adminProsesUploadMasterCSV",
-        mapArgs:(a)=>a[0], raw:true }, // raw: body dikirim sebagai text/plain (isi CSV)
-      ambilDaftarGuruAdmin: { method:"GET", path:"/ambilDaftarGuruAdmin",
+      adminProsesUploadMasterCSV: { method:"POST", action:"adminProsesUploadMasterCSV",
+        mapArgs:(a)=>({ dataString:a[0] }) },
+      ambilDaftarGuruAdmin: { method:"GET", action:"ambilDaftarGuruAdmin",
         mapArgs:(a)=>({}) },
-      adminResetNilaiSemua: { method:"POST", path:"/adminResetNilaiSemua",
+      adminResetNilaiSemua: { method:"POST", action:"adminResetNilaiSemua",
         mapArgs:(a)=>({ scope:a[0], mapelTarget:a[1], kelasTarget:a[2], tpList:a[3], hapusAsas:a[4] }) }
     };
 
@@ -90,20 +104,22 @@
         if(onFailure) onFailure(new Error("Fungsi tidak dikenal: "+namaFungsi));
         return;
       }
-      let url = API_BASE + def.path;
-      const opsi = { method: def.method, headers: {} };
+      const payload = def.mapArgs(args);
+      let url, opsi;
 
-      if(def.raw){
-        opsi.headers["Content-Type"] = "text/plain";
-        opsi.body = def.mapArgs(args);
+      if(def.method === "GET"){
+        url = APPS_SCRIPT_URL + "?action=" + encodeURIComponent(def.action) + "&" + buatQueryString(payload).replace(/^\?/,"");
+        opsi = { method:"GET" };
       } else {
-        const payload = def.mapArgs(args);
-        if(def.method === "GET"){
-          url += buatQueryString(payload);
-        } else {
-          opsi.headers["Content-Type"] = "application/json";
-          opsi.body = JSON.stringify(payload);
-        }
+        // POST: Apps Script Web App membaca body via e.postData.contents.
+        // Pakai Content-Type text/plain agar tidak memicu CORS preflight
+        // (preflight OPTIONS tidak didukung oleh Apps Script Web App).
+        url = APPS_SCRIPT_URL;
+        opsi = {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ action: def.action, params: payload })
+        };
       }
 
       fetch(url, opsi)
@@ -120,56 +136,148 @@
 
     function buatRunnerProxy(successFn, failureFn){
       return new Proxy({}, {
-        get(_target, namaFungsi){
-          return function(...args){
-            panggilEndpoint(namaFungsi, args, successFn, failureFn);
-          };
+        get(_t, namaFungsi){
+          return function(...args){ panggilEndpoint(namaFungsi, args, successFn, failureFn); };
         }
       });
     }
 
-    // Tiruan persis API google.script.run, termasuk chaining
-    // .withSuccessHandler().withFailureHandler() dalam urutan apapun,
-    // dan juga pemanggilan langsung tanpa handler:
-    //   google.script.run.namaFungsi(arg)
+    // Tiruan API google.script.run, mendukung chaining dalam urutan apapun
+    // dan juga pemanggilan langsung tanpa handler.
     window.google = {
       script: {
         run: new Proxy({}, {
-          get(_target, prop){
+          get(_t, prop){
             if(prop === "withSuccessHandler"){
               return function(successFn){
-                const chain = {
-                  withFailureHandler:(failureFn)=>buatRunnerProxy(successFn, failureFn),
-                };
-                // Juga izinkan pemanggilan fungsi langsung tanpa withFailureHandler
+                const chain = { withFailureHandler:(failureFn)=>buatRunnerProxy(successFn, failureFn) };
                 return new Proxy(chain, {
-                  get(t, p2){
-                    if(p2 in t) return t[p2];
-                    return function(...args){ panggilEndpoint(p2, args, successFn, null); };
-                  }
+                  get(t,p2){ if(p2 in t) return t[p2]; return (...args)=>panggilEndpoint(p2,args,successFn,null); }
                 });
               };
             }
             if(prop === "withFailureHandler"){
               return function(failureFn){
-                const chain = {
-                  withSuccessHandler:(successFn)=>buatRunnerProxy(successFn, failureFn),
-                };
+                const chain = { withSuccessHandler:(successFn)=>buatRunnerProxy(successFn, failureFn) };
                 return new Proxy(chain, {
-                  get(t, p2){
-                    if(p2 in t) return t[p2];
-                    return function(...args){ panggilEndpoint(p2, args, null, failureFn); };
-                  }
+                  get(t,p2){ if(p2 in t) return t[p2]; return (...args)=>panggilEndpoint(p2,args,null,failureFn); }
                 });
               };
             }
-            // Pemanggilan langsung: google.script.run.namaFungsi(...)
             return function(...args){ panggilEndpoint(prop, args, null, null); };
           }
         })
       }
     };
   })();
+
+  // ============================================================
+  // SISTEM DRAFT LOKAL — antrian perubahan nilai yang belum disimpan
+  // ============================================================
+  const DRAFT_STORAGE_KEY = "absena_draft_nilai";
+
+  // antrianDraftNilai: Map agar perubahan berulang pada sel yang sama
+  // (user mengetik ulang sebelum klik simpan) hanya menyimpan nilai
+  // TERAKHIR, bukan menumpuk banyak entri untuk sel yang sama.
+  // Key dibentuk dari kombinasi id+mapel+tp+sub agar unik per sel.
+  let antrianDraftNilai = new Map();
+
+  function kunciDraft(id, mapel, tp, sub){ return id + "|" + mapel + "|" + tp + "|" + sub; }
+
+  function muatDraftDariLocalStorage(){
+    try {
+      const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if(!raw) return;
+      const arr = JSON.parse(raw);
+      antrianDraftNilai = new Map(arr.map(item => [kunciDraft(item.barisExcel, item.mapel, item.tpKomp, item.subKomp), item]));
+    } catch(e) { console.warn("Gagal memuat draft lokal:", e); }
+  }
+
+  function simpanDraftKeLocalStorage(){
+    try {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(Array.from(antrianDraftNilai.values())));
+    } catch(e) { console.warn("Gagal menyimpan draft lokal:", e); }
+  }
+
+  function perbaruiBadgeDraft(){
+    const n = antrianDraftNilai.size;
+    const badge = document.getElementById('badgeJumlahDraft');
+    const btn = document.getElementById('btnSimpanKeSheet');
+    if(!badge || !btn) return;
+    if(n > 0){
+      badge.style.display = "inline-block";
+      badge.innerText = n;
+      btn.style.boxShadow = "0 0 0 3px rgba(217,119,6,0.4), 0 2px 12px rgba(217,119,6,0.6)";
+    } else {
+      badge.style.display = "none";
+      btn.style.boxShadow = "0 2px 12px rgba(217,119,6,0.4)";
+    }
+  }
+
+  // Dipanggil dari updateNilai() menggantikan pemanggilan server langsung.
+  // Hanya mencatat ke antrian + localStorage, TIDAK ada request jaringan.
+  function catatPerubahanDraft(id, mapel, tp, sub, val){
+    const key = kunciDraft(id, mapel, tp, sub);
+    antrianDraftNilai.set(key, { barisExcel:id, mapel:mapel, tpKomp:tp, subKomp:sub, nilai:val });
+    simpanDraftKeLocalStorage();
+    perbaruiBadgeDraft();
+  }
+
+  // Dipanggil oleh tombol "Simpan ke Sheet" di header.
+  // Mengirim SEMUA perubahan di antrian sekaligus dalam 1 request batch.
+  function eksekusiSimpanKeSheet(){
+    if(antrianDraftNilai.size === 0){
+      bukaDialogNotifKustom("Tidak Ada Perubahan","Belum ada nilai baru yang diketik sejak penyimpanan terakhir.","peringatan");
+      return;
+    }
+    const daftarPerubahan = Array.from(antrianDraftNilai.values());
+    const labelBtn = document.getElementById('labelBtnSimpan');
+    const btn = document.getElementById('btnSimpanKeSheet');
+    const labelAsli = labelBtn.innerText;
+
+    btn.disabled = true;
+    labelBtn.innerText = "Menyimpan...";
+    bukaLoadingSistem("Menyimpan ke Google Sheet...", `Mengirim ${daftarPerubahan.length} perubahan nilai ke server.`);
+
+    google.script.run
+      .withSuccessHandler(function(hasil){
+        tutupLoadingSistem();
+        btn.disabled = false;
+        labelBtn.innerText = labelAsli;
+        if(hasil && hasil.ok){
+          antrianDraftNilai.clear();
+          simpanDraftKeLocalStorage();
+          perbaruiBadgeDraft();
+          bukaDialogNotifKustom("Tersimpan", `${hasil.jumlahDiproses} nilai berhasil disimpan ke Google Sheet.`, "sukses");
+        } else {
+          bukaDialogNotifKustom("Sebagian Gagal", "Beberapa nilai gagal disimpan. Coba klik Simpan lagi.\n" + ((hasil&&hasil.error)?hasil.error.slice(0,3).join("; "):""), "peringatan");
+        }
+      })
+      .withFailureHandler(function(err){
+        tutupLoadingSistem();
+        btn.disabled = false;
+        labelBtn.innerText = labelAsli;
+        bukaDialogNotifKustom("Gagal Menyimpan", "Tidak bisa menghubungi server. Perubahan TETAP tersimpan di draft lokal, coba klik Simpan lagi: " + err.message, "gagal");
+      })
+      .simpanNilaiBatch(daftarPerubahan);
+  }
+
+  // Peringatkan user jika menutup tab padahal masih ada draft belum disimpan
+  window.addEventListener('beforeunload', function(e){
+    if(antrianDraftNilai.size > 0){
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
+  // Muat draft yang mungkin tersisa dari sesi sebelumnya (browser sama,
+  // tab tertutup tanpa sengaja sebelum reload — TIDAK hilang dalam kasus
+  // ini karena masih di localStorage; hanya hilang jika localStorage
+  // browser dibersihkan atau device berbeda).
+  document.addEventListener('DOMContentLoaded', function(){
+    muatDraftDariLocalStorage();
+    perbaruiBadgeDraft();
+  });
   </script>
   <style>
     :root {
@@ -1017,6 +1125,13 @@
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <!-- ====== TOMBOL SIMPAN KE SHEET (mode draft lokal) ====== -->
+      <button onclick="eksekusiSimpanKeSheet()" id="btnSimpanKeSheet"
+        style="display:flex;align-items:center;gap:6px;padding:9px 16px;border-radius:10px;border:1px solid rgba(245,158,11,0.4);background:linear-gradient(135deg,#d97706,#92400e);color:#fff;font-size:11px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;box-shadow:0 2px 12px rgba(217,119,6,0.4);">
+        <span class="material-icons-round" style="font-size:16px;">cloud_upload</span>
+        <span id="labelBtnSimpan">Simpan ke Sheet</span>
+        <span id="badgeJumlahDraft" style="display:none;background:rgba(255,255,255,0.25);border-radius:20px;padding:1px 7px;font-size:10px;">0</span>
+      </button>
       <button onclick="navigasiKe('dashboard')" id="tabDashboard" class="nav-tab aktif"><span class="material-icons-round" style="font-size:15px;">dashboard</span> Dashboard</button>
       <button onclick="navigasiKe('input')" id="tabInput" class="nav-tab"><span class="material-icons-round" style="font-size:15px;">edit_note</span> Input Nilai</button>
       <button onclick="navigasiKe('leger')" id="tabLeger" class="nav-tab"><span class="material-icons-round" style="font-size:15px;">grid_view</span> Rekap e-Rapor</button>
@@ -1949,7 +2064,13 @@
       nRapor=Math.round((rataTP*bSistem.globalSumatif)+(nA*bSistem.globalAsas)+(nH*bSistem.globalKehadiran));
     }
     document.getElementById(`cRap-${id}`).innerText=nRapor;
-    google.script.run.simpanNilaiMultiMapel(id, normalisasiMapel(userAktif.role==="ADMIN"?"PKN":userAktif.mapel), tp, sub, val);
+    // ====== PERUBAHAN MODE PENYIMPANAN ======
+    // Sebelumnya baris ini langsung memanggil server tiap kali user
+    // mengetik 1 nilai (google.script.run.simpanNilaiMultiMapel(...)).
+    // Sekarang: nilai HANYA disimpan ke antrian lokal (draft) di memori
+    // + localStorage. Data baru benar-benar dikirim ke Google Sheet
+    // saat user menekan tombol "Simpan ke Sheet".
+    catatPerubahanDraft(id, normalisasiMapel(userAktif.role==="ADMIN"?"PKN":userAktif.mapel), tp, sub, val);
   }
 
   // ===== MODAL KONFIRMASI HAPUS =====
