@@ -241,7 +241,7 @@
 
     btn.disabled = true;
     labelBtn.innerText = "Menyimpan...";
-    bukaLoadingSistem("Menyimpan ke Google Sheet...", `Mengirim ${daftarPerubahan.length} perubahan nilai ke server.`);
+    bukaLoadingSistem("Menyimpan ke Database...", `Mengirim ${daftarPerubahan.length} perubahan nilai ke server.`);
 
     google.script.run
       .withSuccessHandler(function(hasil){
@@ -252,7 +252,7 @@
           antrianDraftNilai.clear();
           simpanDraftKeLocalStorage();
           perbaruiBadgeDraft();
-          bukaDialogNotifKustom("Simpan Data Sukses", `${hasil.jumlahDiproses} nilai berhasil disimpan ke Google Sheet.`, "sukses");
+          bukaDialogNotifKustom("Simpan Data Sukses", `${hasil.jumlahDiproses} nilai berhasil tersimpan ke database.`, "sukses");
         } else {
           bukaDialogNotifKustom("Sebagian Gagal", "Beberapa nilai gagal disimpan. Coba klik Simpan lagi.\n" + ((hasil&&hasil.error)?hasil.error.slice(0,3).join("; "):""), "peringatan");
         }
