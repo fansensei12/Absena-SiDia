@@ -3,6 +3,10 @@
 <head>
   <base target="_top">
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>ABSENA SiDia - Portal Spensev</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
@@ -223,7 +227,7 @@
     perbaruiBadgeDraft();
   }
 
-  // Dipanggil oleh tombol "Simpan ke Sheet" di header.
+  // Dipanggil oleh tombol "Simpan Data" di header.
   // Mengirim SEMUA perubahan di antrian sekaligus dalam 1 request batch.
   function eksekusiSimpanKeSheet(){
     if(antrianDraftNilai.size === 0){
@@ -248,7 +252,7 @@
           antrianDraftNilai.clear();
           simpanDraftKeLocalStorage();
           perbaruiBadgeDraft();
-          bukaDialogNotifKustom("Tersimpan", `${hasil.jumlahDiproses} nilai berhasil disimpan ke Google Sheet.`, "sukses");
+          bukaDialogNotifKustom("Simpan Data Sukses", `${hasil.jumlahDiproses} nilai berhasil disimpan ke Google Sheet.`, "sukses");
         } else {
           bukaDialogNotifKustom("Sebagian Gagal", "Beberapa nilai gagal disimpan. Coba klik Simpan lagi.\n" + ((hasil&&hasil.error)?hasil.error.slice(0,3).join("; "):""), "peringatan");
         }
@@ -680,6 +684,85 @@
     }
     .btn-eksekusi-reset.aktif { opacity: 1; pointer-events: auto; }
     .btn-eksekusi-reset.aktif:hover { background: linear-gradient(135deg,#ef4444,#dc2626); transform:translateY(-1px); box-shadow:0 6px 24px rgba(239,68,68,0.45); }
+
+    /* ============================================================
+       RESPONSIVE MOBILE (≤768px)
+       Hanya menyesuaikan ukuran/posisi elemen yang sudah ada,
+       tidak mengubah struktur HTML maupun logic JS.
+       ============================================================ */
+    @media (max-width: 768px) {
+      html, body { overflow-x: hidden; }
+
+      .app-header {
+        padding: 8px 10px !important;
+        gap: 6px !important;
+      }
+      .app-header > div:first-child {
+        gap: 8px !important;
+      }
+      .app-header .logo-icon { width: 36px !important; height: 36px !important; }
+      .app-header #btnToggleSidebar { width: 38px !important; height: 38px !important; }
+
+      /* Judul aplikasi di header: kecilkan & sembunyikan subjudul jika sempit */
+      .app-header h1 { font-size: 14px !important; }
+      .app-header p { display: none !important; }
+      .app-header span[style*="d97706"] { display: none !important; } /* sembunyikan "By NOOR IRFAN" di HP */
+
+      /* Tombol navigasi: ciutkan jadi ikon-saja + scroll horizontal */
+      .app-header > div:last-child {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        flex-wrap: nowrap !important;
+        justify-content: flex-start !important;
+        padding-bottom: 2px;
+      }
+      .nav-tab {
+        padding: 8px 10px !important;
+        font-size: 9.5px !important;
+        flex-shrink: 0;
+      }
+
+      /* Tombol Simpan ke Sheet: tetap full-lebar & menonjol di mobile */
+      #btnSimpanKeSheet {
+        padding: 8px 12px !important;
+        font-size: 10px !important;
+        flex-shrink: 0;
+      }
+
+      /* Sidebar: full width di HP supaya nyaman disentuh */
+      #sidebar { width: 86% !important; max-width: 320px; }
+
+      /* Tabel nilai & leger: pastikan scroll horizontal nyaman,
+         dan sel input cukup besar untuk disentuh jari (≥36px). */
+      .tabel-nilai, .tabel-leger { font-size: 11px !important; }
+      .inp-nilai {
+        min-width: 44px !important;
+        min-height: 36px !important;
+        font-size: 13px !important;
+        text-align: center;
+      }
+      .tabel-nilai th, .tabel-leger th { font-size: 9px !important; padding: 6px 4px !important; }
+      .tabel-nilai td, .tabel-leger td { padding: 2px !important; }
+
+      /* Hero dashboard: padding lebih kecil di HP */
+      .dash-hero > div { padding: 18px 16px 16px !important; }
+
+      /* Modal/dialog: lebih lebar mengisi layar, margin lebih kecil */
+      .modal-box { width: 92% !important; max-width: 380px !important; margin: 0 auto !important; }
+
+      /* Grid 2 kolom di dashboard (ringkasan, dsb): tetap 1 kolom di HP supaya tidak sempit */
+      #dashGridDua { grid-template-columns: 1fr !important; }
+
+      main#mainContent { padding: 12px !important; }
+    }
+
+    @media (max-width: 480px) {
+      .nav-tab span:not(.material-icons-round) { display: none; } /* sembunyikan label teks, sisakan ikon */
+      .nav-tab { padding: 8px !important; }
+      #labelBtnSimpan { display: none; } /* di HP sangat kecil, sisakan ikon+badge saja */
+      #btnSimpanKeSheet { padding: 8px 10px !important; }
+    }
   </style>
 </head>
 <body>
@@ -1129,7 +1212,7 @@
       <button onclick="eksekusiSimpanKeSheet()" id="btnSimpanKeSheet"
         style="display:flex;align-items:center;gap:6px;padding:9px 16px;border-radius:10px;border:1px solid rgba(245,158,11,0.4);background:linear-gradient(135deg,#d97706,#92400e);color:#fff;font-size:11px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;box-shadow:0 2px 12px rgba(217,119,6,0.4);">
         <span class="material-icons-round" style="font-size:16px;">cloud_upload</span>
-        <span id="labelBtnSimpan">Simpan ke Sheet</span>
+        <span id="labelBtnSimpan">Simpan Data</span>
         <span id="badgeJumlahDraft" style="display:none;background:rgba(255,255,255,0.25);border-radius:20px;padding:1px 7px;font-size:10px;">0</span>
       </button>
       <button onclick="navigasiKe('dashboard')" id="tabDashboard" class="nav-tab aktif"><span class="material-icons-round" style="font-size:15px;">dashboard</span> Dashboard</button>
@@ -1821,7 +1904,7 @@
       // Kolom input: 0=nh1,1=nh2,2=nh3,3=nh4,4=sh,5=nilaiAsas,6=kehadiran
       const rowIdx = no - 1;
       const mkInp = (val, sub, cls, col) =>
-        `<td style="padding:3px;"><input type="text" value="${val||''}"
+        `<td style="padding:3px;"><input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" value="${val||''}"
           data-id="${s.id}" data-tp="${fTp}" data-sub="${sub}" data-row="${rowIdx}" data-col="${col}"
           onchange="updateNilai(${s.id},'${fTp}','${sub}',this.value);warnaiInputNilai(this)"
           onkeydown="handleNilaiKeydown(event,this)"
